@@ -41,6 +41,12 @@ test2 = runEmulatorTraceIO $ runTrace2
 test3 :: IO ()
 test3 = runEmulatorTraceIO $ runTrace3
 
+test4 :: IO ()
+test4 = runEmulatorTraceIO $ runTrace4
+
+test5 :: IO ()
+test5 = runEmulatorTraceIO $ runTrace5
+
 w1, w2, w3 :: Wallet
 w1 = X.knownWallet 1
 w2 = X.knownWallet 2
@@ -56,7 +62,7 @@ getTT h = do
         Just tt -> Extras.logInfo ("read thread token " ++ show tt) >> return tt
 
 testContractAmount :: Integer
-testContractAmount = 8_000_000
+testContractAmount = 80_000_000
 
 testTrancheCount :: Integer
 testTrancheCount = 4
@@ -67,41 +73,53 @@ testContractStartTime = slotToBeginPOSIXTime def 10
 testContractEndTime :: POSIXTime
 testContractEndTime = slotToBeginPOSIXTime def 18
 
+buildPublishParam :: PublishParam
+buildPublishParam =
+  PublishParam
+    { p      = pkh1
+    , c      = pkh2
+    , st     = startTime
+    , et     = endTime
+    , tc     = testTrancheCount
+    , ll     = amount
+    }
+    where
+      pkh1      = (pubKeyHash . walletPubKey) $ w1
+      pkh2      = (pubKeyHash . walletPubKey) $ w2
+      amount    = testContractAmount
+      startTime = testContractStartTime
+      endTime   = testContractEndTime
+
+buildUseParam :: ThreadToken -> UseParam
+buildUseParam tt =
+  UseParam
+    { up      = pkh1
+    , uc      = pkh2
+    , ust     = startTime
+    , uet     = endTime
+    , ull     = amount
+    , utc     = testTrancheCount
+    , uttn    = tt
+    }
+    where
+      pkh1      = (pubKeyHash . walletPubKey) $ w1
+      pkh2      = (pubKeyHash . walletPubKey) $ w2
+      amount    = testContractAmount
+      startTime = testContractStartTime
+      endTime   = testContractEndTime
+
 runTrace1 ::EmulatorTrace ()
 runTrace1 = do
     h1 <- activateContractWallet w1 startEscrowEndpoint
-    h2 <- activateContractWallet w2 useEscrowEndpoint
+    h2 <- activateContractWallet w2 useEscrowEndpoints
 
-    let pkh1      = (pubKeyHash . walletPubKey) $ w1
-        pkh2      = (pubKeyHash . walletPubKey) $ w2
-        amount    = testContractAmount
-        startTime = testContractStartTime
-        endTime   = testContractEndTime
-
-        param = PublishParam
-                { p      = pkh1
-                , c      = pkh2
-                , st     = startTime
-                , et     = endTime
-                , tc     = testTrancheCount
-                , ll     = amount
-                }
-
+    let param = buildPublishParam
     void $ Emulator.waitNSlots 1
-    callEndpoint @"publish" h1 (param, True)
+    callEndpoint @"publish" h1 param
     tt <- getTT h1
+
     void $ Emulator.waitNSlots 1
-
-    let useParam = UseParam
-                    { up      = pkh1
-                    , uc      = pkh2
-                    , ust     = startTime
-                    , uet     = endTime
-                    , ull     = amount
-                    , utc     = testTrancheCount
-                    , uttn    = tt
-                    }
-
+    let useParam = buildUseParam tt
     callEndpoint @"accept" h2 useParam
 
     void $ Emulator.waitNSlots 1
@@ -110,40 +128,18 @@ runTrace1 = do
 runTrace2 ::EmulatorTrace ()
 runTrace2 = do
     h1 <- activateContractWallet w1 startEscrowEndpoint
-    h2 <- activateContractWallet w2 useEscrowEndpoint
+    h2 <- activateContractWallet w2 useEscrowEndpoints
     h3 <- activateContractWallet w1 collectEscrowEndpoint
 
-    let pkh1      = (pubKeyHash . walletPubKey) $ w1
-        pkh2      = (pubKeyHash . walletPubKey) $ w2
-        amount    = testContractAmount
-        startTime = testContractStartTime
-        endTime   = testContractEndTime
-
-        param = PublishParam
-                { p      = pkh1
-                , c      = pkh2
-                , st     = startTime
-                , et     = endTime
-                , tc     = testTrancheCount
-                , ll     = amount
-                }
-
+    let param = buildPublishParam
     void $ Emulator.waitNSlots 1
-    callEndpoint @"publish" h1 (param, True)
+    callEndpoint @"publish" h1 param
     tt <- getTT h1
+
     void $ Emulator.waitNSlots 1
-
-    let useParam = UseParam
-                    { up      = pkh1
-                    , uc      = pkh2
-                    , ust     = startTime
-                    , uet     = endTime
-                    , ull     = amount
-                    , utc     = testTrancheCount
-                    , uttn    = tt
-                    }
-
+    let useParam = buildUseParam tt
     callEndpoint @"accept" h2 useParam
+
     void $ Emulator.waitNSlots 2
     callEndpoint @"collect" h3 useParam
     void $ Emulator.waitNSlots 1
@@ -152,40 +148,18 @@ runTrace2 = do
 runTrace3 ::EmulatorTrace ()
 runTrace3 = do
     h1 <- activateContractWallet w1 startEscrowEndpoint
-    h2 <- activateContractWallet w2 useEscrowEndpoint
+    h2 <- activateContractWallet w2 useEscrowEndpoints
     h3 <- activateContractWallet w1 collectEscrowEndpoint
 
-    let pkh1      = (pubKeyHash . walletPubKey) $ w1
-        pkh2      = (pubKeyHash . walletPubKey) $ w2
-        amount    = testContractAmount
-        startTime = testContractStartTime
-        endTime   = testContractEndTime
-
-        param = PublishParam
-                { p      = pkh1
-                , c      = pkh2
-                , st     = startTime
-                , et     = endTime
-                , tc     = testTrancheCount
-                , ll     = amount
-                }
-
+    let param = buildPublishParam
     void $ Emulator.waitNSlots 1
-    callEndpoint @"publish" h1 (param, True)
+    callEndpoint @"publish" h1 param
     tt <- getTT h1
+
     void $ Emulator.waitNSlots 1
-
-    let useParam = UseParam
-                    { up      = pkh1
-                    , uc      = pkh2
-                    , ust     = startTime
-                    , uet     = endTime
-                    , ull     = amount
-                    , utc     = testTrancheCount
-                    , uttn    = tt
-                    }
-
+    let useParam = buildUseParam tt
     callEndpoint @"accept" h2 useParam
+
     void $ Emulator.waitUntilSlot 10
     callEndpoint @"collect" h3 useParam
     void $ Emulator.waitNSlots 1
@@ -196,42 +170,51 @@ runTrace3 = do
 runTrace4 ::EmulatorTrace ()
 runTrace4 = do
     h1 <- activateContractWallet w1 startEscrowEndpoint
-    h2 <- activateContractWallet w2 useEscrowEndpoint
+    h2 <- activateContractWallet w2 useEscrowEndpoints
     h3 <- activateContractWallet w1 collectEscrowEndpoint
 
-    let pkh1      = (pubKeyHash . walletPubKey) $ w1
-        pkh2      = (pubKeyHash . walletPubKey) $ w2
-        amount    = testContractAmount
-        startTime = testContractStartTime
-        endTime   = testContractEndTime
-
-        param = PublishParam
-                { p      = pkh1
-                , c      = pkh2
-                , st     = startTime
-                , et     = endTime
-                , tc     = testTrancheCount
-                , ll     = amount
-                }
-
+    let param = buildPublishParam
     void $ Emulator.waitNSlots 1
-    callEndpoint @"publish" h1 (param, True)
+    callEndpoint @"publish" h1 param
     tt <- getTT h1
+
     void $ Emulator.waitNSlots 1
-
-    let useParam = UseParam
-                    { up      = pkh1
-                    , uc      = pkh2
-                    , ust     = startTime
-                    , uet     = endTime
-                    , ull     = amount
-                    , utc     = testTrancheCount
-                    , uttn    = tt
-                    }
-
+    let useParam = buildUseParam tt
     callEndpoint @"accept" h2 useParam
+
     void $ Emulator.waitUntilSlot 10
     callEndpoint @"collect" h3 useParam
+    void $ Emulator.waitNSlots 2
+    callEndpoint @"collect" h3 useParam
+    void $ Emulator.waitNSlots 2
+    callEndpoint @"collect" h3 useParam
+    void $ Emulator.waitNSlots 2
+    callEndpoint @"collect" h3 useParam
+    void $ Emulator.waitNSlots 2
+
+-- Once consumer raises dispute (after tranche2) the provider cannot collect funds
+runTrace5 ::EmulatorTrace ()
+runTrace5 = do
+    h1 <- activateContractWallet w1 startEscrowEndpoint
+    h2 <- activateContractWallet w2 useEscrowEndpoints
+    h3 <- activateContractWallet w1 collectEscrowEndpoint
+
+    let param = buildPublishParam
+    void $ Emulator.waitNSlots 1
+    callEndpoint @"publish" h1 param
+    tt <- getTT h1
+
+    void $ Emulator.waitNSlots 1
+    let useParam = buildUseParam tt
+    callEndpoint @"accept" h2 useParam
+
+    void $ Emulator.waitUntilSlot 10
+    callEndpoint @"collect" h3 useParam
+    void $ Emulator.waitNSlots 2
+    callEndpoint @"collect" h3 useParam
+    void $ Emulator.waitNSlots 2
+    callEndpoint @"dispute" h2 useParam
     void $ Emulator.waitNSlots 1
     callEndpoint @"collect" h3 useParam
-    void $ Emulator.waitNSlots 1
+    void $ Emulator.waitNSlots 5
+    callEndpoint @"collect" h3 useParam

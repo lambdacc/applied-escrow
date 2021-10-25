@@ -68,7 +68,7 @@ publishAndAcceptTest = checkPredicate "Publish and accept test"
 runTrace1 ::EmulatorTrace ()
 runTrace1 = do
     h1 <- activateContractWallet w1 startEscrowEndpoint
-    h2 <- activateContractWallet w2 useEscrowEndpoint
+    h2 <- activateContractWallet w2 useEscrowEndpoints
 
     let pkh1      = (pubKeyHash . walletPubKey) $ w1
         pkh2      = (pubKeyHash . walletPubKey) $ w2
@@ -86,7 +86,7 @@ runTrace1 = do
                 }
 
     void $ Emulator.waitNSlots 1
-    callEndpoint @"publish" h1 (param, True)
+    callEndpoint @"publish" h1 param
     tt <- getTT h1
     void $ Emulator.waitNSlots 1
 
@@ -115,7 +115,7 @@ publishAcceptAndPayTranchesTest = checkPredicate "Publish, accept and pay tranch
 runTrace2 ::EmulatorTrace ()
 runTrace2 = do
     h1 <- activateContractWallet w1 startEscrowEndpoint
-    h2 <- activateContractWallet w2 useEscrowEndpoint
+    h2 <- activateContractWallet w2 useEscrowEndpoints
 
     let pkh1      = (pubKeyHash . walletPubKey) $ w1
         pkh2      = (pubKeyHash . walletPubKey) $ w2
@@ -133,7 +133,7 @@ runTrace2 = do
                 }
 
     void $ Emulator.waitNSlots 1
-    callEndpoint @"publish" h1 (param, True)
+    callEndpoint @"publish" h1 param
     tt <- getTT h1
     void $ Emulator.waitNSlots 1
 

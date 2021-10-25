@@ -22,7 +22,7 @@ module AppliedEscrow
     , ThreadToken
     , Text
     , startEscrowEndpoint
-    , useEscrowEndpoint
+    , useEscrowEndpoints
     , collectEscrowEndpoint
     ) where
 
@@ -34,6 +34,7 @@ import           GHC.Generics                 (Generic)
 import           Ledger                       hiding (singleton)
 import           Ledger.Ada                   as Ada
 import           Ledger.Constraints           as Constraints
+import           Ledger.Constraints.TxConstraints as TxConstraints
 import           Ledger.Typed.Tx
 import qualified Ledger.Typed.Scripts         as Scripts
 import qualified Ledger.Tx                    as Tx
@@ -90,13 +91,25 @@ transition escrow s r = case (escrow, stateData s,stateValue s, r) of
                                                 v <>
                                                 contractValue e
                                               )
-    (e, Active, v, Collect)               -> Just ( Constraints.mustBeSignedBy (provider e) <>
+    (e, Active, v, Collect)           -> Just ( Constraints.mustBeSignedBy (provider e) <>
                                                 Constraints.mustValidateIn (from $ payableTime e v) <>
-                                                {-Constraints.mustValidateIn (to $ endTime e) <>-}
                                                 Constraints.mustPayToPubKey (provider e) (trancheValue e)
                                               , State Active $
                                                 v <>
                                                 negate (trancheValue e)
+                                              )
+    (e, Active, v, Dispute)           -> Just ( Constraints.mustBeSignedBy (consumer e) <>
+                                                Constraints.mustValidateIn (from $ startTime escrow) <>
+                                                Constraints.mustValidateIn (to $ endTime escrow)
+                                              , State Disputed $
+                                                v
+                                              )
+    (e, Active, v, Close)             -> Just ( TxConstraints.mustSatisfyAnyOf
+                                                  [Constraints.mustBeSignedBy (provider e), Constraints.mustBeSignedBy (consumer e)] <>
+                                                Constraints.mustValidateIn (from $ startTime escrow) <>
+                                                Constraints.mustPayToPubKey (consumer e) (v)
+                                              , State Closed $
+                                                mempty
                                               )
     otherwise                         -> Nothing
 
@@ -106,7 +119,7 @@ transition escrow s r = case (escrow, stateData s,stateValue s, r) of
 payableTime :: AppliedEscrow -> Value -> POSIXTime
 payableTime e v =
   let start = getPOSIXTime $ startTime e; end = getPOSIXTime $ endTime e; totalTime = end - start; totalAmount = lovelaces $ contractValue e; currentAmount = lovelaces v
-    in POSIXTime $ end - Builtins.multiplyInteger (PP.divide currentAmount totalAmount)  totalTime
+    in POSIXTime $ end - (Builtins.multiplyInteger totalTime currentAmount) `PP.divide` totalAmount
 
 {-# INLINABLE trancheValue #-}
 trancheValue :: AppliedEscrow -> Value
@@ -157,8 +170,8 @@ data PublishParam = PublishParam
     , tc  :: !Integer
     } deriving (Show, Generic, FromJSON, ToJSON, ToSchema)
 
-publish :: forall s. PublishParam -> Bool -> Contract (Last ThreadToken) s Text ()
-publish param useTT = do
+publish :: forall s. PublishParam -> Contract (Last ThreadToken) s Text ()
+publish param = do
   pkh <- pubKeyHash <$> Contract.ownPubKey
   tt  <- mapError' getThreadToken
   logInfo @String $ "Logging thread token: " ++ show tt
@@ -187,24 +200,27 @@ data UseParam = UseParam
     , uttn :: !ThreadToken
     } deriving (Show, Generic, FromJSON, ToJSON, ToSchema)
 
+useParamToAppliedEscrow :: UseParam -> AppliedEscrow
+useParamToAppliedEscrow param =
+              AppliedEscrow
+                { provider        = up param
+                , consumer        = uc param
+                , startTime       = ust param
+                , endTime         = uet param
+                , contractValue   = lovelaceValueOf $ ull param
+                , tranches        = utc param
+                , eTT             = uttn param
+                }
+
 accept :: UseParam -> Contract w s Text ()
 accept param = do
   pkh <- pubKeyHash <$> Contract.ownPubKey
-  let escrow   = AppliedEscrow
-              { provider        = up param
-              , consumer        = pkh
-              , startTime       = ust param
-              , endTime         = uet param
-              , contractValue   = lovelaceValueOf $ ull param
-              , tranches        = utc param
-              , eTT             = uttn param
-              }
-
-      client = escrowClient escrow
+  let escrow' = useParamToAppliedEscrow param
+      escrow  = escrow' {consumer = pkh}
+      client  = escrowClient escrow
   st <- mapError' $ getOnChainState client
   case st of
     Nothing   ->  throwError "Nothing found for on chain state"
-
     Just (onChainState, utxos)  ->
       do
         let OnChainState{ocsTxOut=TypedScriptTxOut{tyTxOutData=currentState}} = onChainState
@@ -214,31 +230,17 @@ accept param = do
             void $ mapError' $ runStep client $ Accept
             logInfo @String $ "Contract accepted: " ++ show escrow
           _ -> logInfo @String $ "Contract not in published state"
-
-    _  ->
-      do
-        logInfo @String "Something else found"
-        void $ mapError' $ runStep client $ Accept
-        logInfo @String $ "Contract accepted: " ++ show escrow
+    _  -> throwError "Something else found for state"
 
 collect :: UseParam -> Contract w s Text ()
 collect param = do
   pkh <- pubKeyHash <$> Contract.ownPubKey
-  let escrow   = AppliedEscrow
-              { provider        = pkh
-              , consumer        = uc param
-              , startTime       = ust param
-              , endTime         = uet param
-              , contractValue   = lovelaceValueOf $ ull param
-              , tranches        = utc param
-              , eTT             = uttn param
-              }
-
+  let escrow' = useParamToAppliedEscrow param
+      escrow  = escrow' {provider = pkh}
       client = escrowClient escrow
   st <- mapError' $ getOnChainState client
   case st of
     Nothing   ->  throwError "Nothing found for on chain state"
-
     Just (onChainState, utxos)  ->
       do
         let OnChainState{ocsTxOut=TypedScriptTxOut{tyTxOutData=currentState}} = onChainState
@@ -248,31 +250,53 @@ collect param = do
             void $ mapError' $ runStep client $ Collect
             logInfo @String $ "Funds collected: " ++ show escrow
           _ -> logInfo @String $ "Contract not in active state"
+    _  -> throwError "Something else found for state"
 
-    _  ->
+
+dispute :: UseParam -> Contract w s Text ()
+dispute param = do
+  pkh <- pubKeyHash <$> Contract.ownPubKey
+  let escrow' = useParamToAppliedEscrow param
+      escrow  = escrow' {consumer = pkh}
+      client = escrowClient escrow
+  st <- mapError' $ getOnChainState client
+  case st of
+    Nothing   ->  throwError "Nothing found for on chain state"
+    Just (onChainState, utxos)  ->
       do
-        logInfo @String "Something else found"
-        void $ mapError' $ runStep client $ Accept
-        logInfo @String $ "Contract accepted: " ++ show escrow
+        let OnChainState{ocsTxOut=TypedScriptTxOut{tyTxOutData=currentState}} = onChainState
+        logInfo @String $ "Escrow contract found in state: " ++ show currentState
+        case currentState of
+          Active -> do
+            void $ mapError' $ runStep client $ Dispute
+            logInfo @String $ "Dispute registered: " ++ show escrow
+          _ -> logInfo @String $ "Contract not in active state"
+    _  -> throwError "Something else found for state"
 
-type StartAppliedEscrowSchema = Endpoint "publish" (PublishParam, Bool)
+type StartAppliedEscrowSchema = Endpoint "publish" PublishParam
 
 type UseAppliedEscrowSchema = Endpoint "accept" UseParam
                           .\/ Endpoint "collect" UseParam
+                          .\/ Endpoint "dispute" UseParam
+
+type CollectPaymentSchema = Endpoint "collect" UseParam
 
 startEscrowEndpoint :: Contract (Last ThreadToken) StartAppliedEscrowSchema Text ()
 startEscrowEndpoint = forever
                         $ handleError logError
                         $ awaitPromise
-                        $ endpoint @"publish" (\(x,y) -> publish x y)
+                        $ endpoint @"publish" (\x -> publish x)
 
-useEscrowEndpoint :: Contract (Last ThreadToken) UseAppliedEscrowSchema Text ()
-useEscrowEndpoint = forever
+useEscrowEndpoints :: Contract (Last ThreadToken) UseAppliedEscrowSchema Text ()
+useEscrowEndpoints = forever
                         $ handleError logError
                         $ awaitPromise
-                        $ endpoint @"accept" (\x -> accept x)
+                        $ accept' `select` dispute'
+                        where
+                          accept'  = endpoint @"accept" (\x -> accept x)
+                          dispute'  = endpoint @"dispute" (\x -> dispute x)
 
-collectEscrowEndpoint :: Contract (Last ThreadToken) UseAppliedEscrowSchema Text ()
+collectEscrowEndpoint :: Contract (Last ThreadToken) CollectPaymentSchema Text ()
 collectEscrowEndpoint = forever
                         $ handleError logError
                         $ awaitPromise

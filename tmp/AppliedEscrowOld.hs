@@ -22,7 +22,7 @@ module AppliedEscrow
     , ThreadToken
     , Text
     , startEscrowEndpoint
-    , useEscrowEndpoint
+    , useEscrowEndpoints
     ) where
 
 import           Control.Monad                hiding (fmap)
@@ -206,8 +206,8 @@ startEscrowEndpoint = forever
                         $ awaitPromise
                         $ endpoint @"publish" (\(x,y) -> publish x y)
 
-useEscrowEndpoint :: Contract (Last ThreadToken) UseAppliedEscrowSchema Text ()
-useEscrowEndpoint = forever
+useEscrowEndpoints :: Contract (Last ThreadToken) UseAppliedEscrowSchema Text ()
+useEscrowEndpoints = forever
                         $ handleError logError
                         $ awaitPromise
                         $ endpoint @"accept" (\x -> accept x)
