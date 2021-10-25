@@ -4,6 +4,7 @@
 {-# LANGUAGE FlexibleContexts      #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE NoImplicitPrelude     #-}
+{-# LANGUAGE NumericUnderscores    #-}
 {-# LANGUAGE OverloadedStrings     #-}
 {-# LANGUAGE ScopedTypeVariables   #-}
 {-# LANGUAGE TemplateHaskell       #-}
@@ -24,6 +25,7 @@ module AppliedEscrow
     , startEscrowEndpoint
     , useEscrowEndpoints
     , collectEscrowEndpoint
+    , threeDaysTime
     ) where
 
 import           Control.Monad                hiding (fmap)
@@ -72,7 +74,13 @@ PlutusTx.makeLift ''EscrowRedeemer
 PlutusTx.makeIsDataIndexed ''EscrowRedeemer [('Accept, 0), ('Collect, 1), ('Withdraw, 2), ('Dispute, 3), ('Close, 4)]
 
 data EscrowDatum = Published | Active | Withdrawn | Disputed | Closed
-    deriving Show
+    deriving (Show)
+
+instance Eq EscrowDatum where
+  (==) Published Published = True
+  (==) Active Active = True
+  (==) Disputed Disputed = True
+  (==) _ _ = False
 
 PlutusTx.makeIsDataIndexed ''EscrowDatum [('Published, 0), ('Active, 1), ('Withdrawn, 2), ('Disputed, 3), ('Closed, 4)]
 
@@ -110,9 +118,20 @@ transition escrow s r = case (escrow, stateData s,stateValue s, r) of
                                               , State Closed $
                                                 mempty
                                               )
+    (e, Disputed, v, Close)           -> Just ( (TxConstraints.mustSatisfyAnyOf
+                                                  [Constraints.mustBeSignedBy (provider e), Constraints.mustBeSignedBy (consumer e)]) <>
+                                                Constraints.mustValidateIn (from $ maxSettlementTime e) <>
+                                                Constraints.mustPayToPubKey (consumer e) (v)
+                                              , State Closed $
+                                                mempty
+                                              )
     _                                 -> Nothing
 
-    where
+
+{-# INLINABLE trancheValue #-}
+trancheValue :: AppliedEscrow -> Value
+trancheValue e =
+  lovelaceValueOf $ PP.divide (lovelaces $ contractValue e) (tranches e)
 
 {-# INLINABLE payableTime #-}
 payableTime :: AppliedEscrow -> Value -> POSIXTime
@@ -120,10 +139,15 @@ payableTime e v =
   let start = getPOSIXTime $ startTime e; end = getPOSIXTime $ endTime e; totalTime = end - start; totalAmount = lovelaces $ contractValue e; currentAmount = lovelaces v
     in POSIXTime $ end - (Builtins.multiplyInteger totalTime currentAmount) `PP.divide` totalAmount
 
-{-# INLINABLE trancheValue #-}
-trancheValue :: AppliedEscrow -> Value
-trancheValue e =
-  lovelaceValueOf $ PP.divide (lovelaces $ contractValue e) (tranches e)
+{-# INLINABLE maxSettlementTime #-}
+maxSettlementTime :: AppliedEscrow -> POSIXTime
+maxSettlementTime e =
+  let end = getPOSIXTime $ endTime e
+    in POSIXTime $ end + threeDaysTime
+
+{-# INLINABLE threeDaysTime #-}
+threeDaysTime :: Integer
+threeDaysTime = 100_000 -- scaling down : hack for testing. Actual is 259_200_000
 
 {-# INLINABLE isClosed #-}
 isClosed :: EscrowDatum -> Bool
@@ -222,13 +246,13 @@ accept param = do
     Nothing   ->  throwError "Nothing found for on chain state"
     Just (onChainState, _)  ->
       do
-        let OnChainState{ocsTxOut=TypedScriptTxOut{tyTxOutData=currentState}} = onChainState
-        logInfo @String $ "Escrow contract found in state: " ++ show currentState
-        case currentState of
+        let OnChainState{ocsTxOut=TypedScriptTxOut{tyTxOutData=valueInState}} = onChainState
+        logInfo @String $ "Escrow contract found in state: " ++ show valueInState
+        case valueInState of
           Published -> do
             void $ mapError' $ runStep client $ Accept
             logInfo @String $ "Contract accepted: " ++ show escrow
-          _ -> logInfo @String $ "Contract not in published state"
+          _ -> logInfo @String $ "Contract has to be in published state for 'Accept' action"
 
 
 collect :: UseParam -> Contract w s Text ()
@@ -242,13 +266,13 @@ collect param = do
     Nothing   ->  throwError "Nothing found for on chain state"
     Just (onChainState, _)  ->
       do
-        let OnChainState{ocsTxOut=TypedScriptTxOut{tyTxOutData=currentState}} = onChainState
-        logInfo @String $ "Escrow contract found in state: " ++ show currentState
-        case currentState of
+        let OnChainState{ocsTxOut=TypedScriptTxOut{tyTxOutData=valueInState}} = onChainState
+        logInfo @String $ "Escrow contract found in state: " ++ show valueInState
+        case valueInState of
           Active -> do
             void $ mapError' $ runStep client $ Collect
             logInfo @String $ "Funds collected: " ++ show escrow
-          _ -> logInfo @String $ "Contract not in active state"
+          _ -> logInfo @String $ "Contract has to be in active state for 'Collect' action"
 
 
 
@@ -263,13 +287,33 @@ dispute param = do
     Nothing   ->  throwError "Nothing found for on chain state"
     Just (onChainState, _)  ->
       do
-        let OnChainState{ocsTxOut=TypedScriptTxOut{tyTxOutData=currentState}} = onChainState
-        logInfo @String $ "Escrow contract found in state: " ++ show currentState
-        case currentState of
+        let OnChainState{ocsTxOut=TypedScriptTxOut{tyTxOutData=valueInState}} = onChainState
+        logInfo @String $ "Escrow contract found in state: " ++ show valueInState
+        case valueInState of
           Active -> do
             void $ mapError' $ runStep client $ Dispute
             logInfo @String $ "Dispute registered: " ++ show escrow
-          _ -> logInfo @String $ "Contract not in active state"
+          _ -> logInfo @String $ "Contract has to be in active state for 'Dispute' action"
+
+
+close :: UseParam -> Contract w s Text ()
+close param = do
+  pkh <- pubKeyHash <$> Contract.ownPubKey
+  let escrow = useParamToAppliedEscrow param
+      client = escrowClient escrow
+  state <- mapError' $ getOnChainState client
+  case state of
+    Nothing   ->  throwError "Nothing found for on chain state"
+    Just (onChainState, _)  ->
+      do
+        let OnChainState{ocsTxOut=TypedScriptTxOut{tyTxOutData=valueInState}} = onChainState
+        logInfo @String $ "Escrow contract found in state: " ++ show valueInState
+        case valueInState of
+            s
+              | s `elem` [Active,Disputed] -> do
+                  void $ mapError' $ runStep client $ Close
+                  logInfo @String $ "Close invoked at state : " ++ show s
+              | otherwise -> logInfo @String $ "Contract has to be in active or disputed state for 'Close' action"
 
 
 type StartAppliedEscrowSchema = Endpoint "publish" PublishParam
@@ -277,6 +321,7 @@ type StartAppliedEscrowSchema = Endpoint "publish" PublishParam
 type UseAppliedEscrowSchema = Endpoint "accept" UseParam
                           .\/ Endpoint "collect" UseParam
                           .\/ Endpoint "dispute" UseParam
+                          .\/ Endpoint "close" UseParam
 
 type CollectPaymentSchema = Endpoint "collect" UseParam
 
@@ -290,14 +335,16 @@ useEscrowEndpoints :: Contract (Last ThreadToken) UseAppliedEscrowSchema Text ()
 useEscrowEndpoints = forever
                         $ handleError logError
                         $ awaitPromise
-                        $ accept' `select` dispute'
+                        $ accept' `select` dispute' `select` close'
                         where
                           accept'  = endpoint @"accept" (\x -> accept x)
                           dispute'  = endpoint @"dispute" (\x -> dispute x)
+                          close'  = endpoint @"close" (\x -> close x)
 
 collectEscrowEndpoint :: Contract (Last ThreadToken) CollectPaymentSchema Text ()
 collectEscrowEndpoint = forever
                         $ handleError logError
                         $ awaitPromise
                         $ endpoint @"collect" (\x -> collect x)
+
 

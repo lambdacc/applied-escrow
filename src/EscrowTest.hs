@@ -23,6 +23,7 @@ import           Ledger
 import           Ledger.TimeSlot
 import           Ledger.Value
 import           Ledger.Ada                 as Ada
+import           Numeric.Natural
 import           Plutus.Contract.Test       ((.&&.), walletFundsChange, checkPredicate)
 import           Plutus.Contract.Trace      as X
 import           Plutus.Trace.Emulator      as Emulator
@@ -46,6 +47,9 @@ test4 = runEmulatorTraceIO $ runTrace4
 
 test5 :: IO ()
 test5 = runEmulatorTraceIO $ runTrace5
+
+test6 :: IO ()
+test6 = runEmulatorTraceIO $ runTrace6
 
 w1, w2, w3 :: Wallet
 w1 = X.knownWallet 1
@@ -192,7 +196,7 @@ runTrace4 = do
     callEndpoint @"collect" h3 useParam
     void $ Emulator.waitNSlots 2
 
--- Once consumer raises dispute (after tranche2) the provider cannot collect funds
+-- Once consumer raises dispute (after tranche2) the provider cannot collect funds, consumer cannot close within three days
 runTrace5 ::EmulatorTrace ()
 runTrace5 = do
     h1 <- activateContractWallet w1 startEscrowEndpoint
@@ -216,5 +220,30 @@ runTrace5 = do
     callEndpoint @"dispute" h2 useParam
     void $ Emulator.waitNSlots 1
     callEndpoint @"collect" h3 useParam
-    void $ Emulator.waitNSlots 5
+    void $ Emulator.waitUntilSlot 117
+    callEndpoint @"close" h2 useParam
+
+-- Disputed after first tranche, consumer can claim back funds after max settlement time - 3 days after end time, has elapsed
+runTrace6 ::EmulatorTrace ()
+runTrace6 = do
+    h1 <- activateContractWallet w1 startEscrowEndpoint
+    h2 <- activateContractWallet w2 useEscrowEndpoints
+    h3 <- activateContractWallet w1 collectEscrowEndpoint
+
+    let param = buildPublishParam
+    void $ Emulator.waitNSlots 1
+    callEndpoint @"publish" h1 param
+    tt <- getTT h1
+
+    void $ Emulator.waitNSlots 1
+    let useParam = buildUseParam tt
+    callEndpoint @"accept" h2 useParam
+
+    void $ Emulator.waitUntilSlot 10
     callEndpoint @"collect" h3 useParam
+    void $ Emulator.waitNSlots 2
+    callEndpoint @"dispute" h2 useParam
+    void $ Emulator.waitNSlots 1
+    callEndpoint @"collect" h3 useParam
+    void $ Emulator.waitUntilSlot 118
+    callEndpoint @"close" h2 useParam
