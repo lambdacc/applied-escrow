@@ -68,7 +68,7 @@ publishAndAcceptTest = checkPredicate "Publish and accept test"
 runTrace1 ::EmulatorTrace ()
 runTrace1 = do
     h1 <- activateContractWallet w1 startEscrowEndpoint
-    h2 <- activateContractWallet w2 acceptEscrowEndpoint
+    h2 <- activateContractWallet w2 useEscrowEndpoint
 
     let pkh1      = (pubKeyHash . walletPubKey) $ w1
         pkh2      = (pubKeyHash . walletPubKey) $ w2
@@ -115,7 +115,7 @@ publishAcceptAndPayTranchesTest = checkPredicate "Publish, accept and pay tranch
 runTrace2 ::EmulatorTrace ()
 runTrace2 = do
     h1 <- activateContractWallet w1 startEscrowEndpoint
-    h2 <- activateContractWallet w2 acceptEscrowEndpoint
+    h2 <- activateContractWallet w2 useEscrowEndpoint
 
     let pkh1      = (pubKeyHash . walletPubKey) $ w1
         pkh2      = (pubKeyHash . walletPubKey) $ w2

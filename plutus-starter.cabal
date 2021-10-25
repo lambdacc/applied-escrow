@@ -42,7 +42,8 @@ library
     import: lang
     exposed-modules:
       AppliedEscrow,
-      EscrowTest
+      EscrowTest,
+      EscrowTestTree
     build-depends:
       base >= 4.9 && < 5,
       aeson,

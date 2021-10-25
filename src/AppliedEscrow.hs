@@ -22,7 +22,8 @@ module AppliedEscrow
     , ThreadToken
     , Text
     , startEscrowEndpoint
-    , acceptEscrowEndpoint
+    , useEscrowEndpoint
+    , collectEscrowEndpoint
     ) where
 
 import           Control.Monad                hiding (fmap)
@@ -61,14 +62,14 @@ PlutusTx.makeLift ''AppliedEscrow
 data EscrowRedeemer =
           Accept
         | Withdraw
-        | Pay
+        | Collect
         | Dispute
         | Close
         deriving (Show, Generic, FromJSON, ToJSON, Prelude.Eq)
 
 {-Is there a better way to do makeIsDataIndexed ?-}
 PlutusTx.makeLift ''EscrowRedeemer
-PlutusTx.makeIsDataIndexed ''EscrowRedeemer [('Accept, 0), ('Pay, 1), ('Withdraw, 2), ('Dispute, 3), ('Close, 4)]
+PlutusTx.makeIsDataIndexed ''EscrowRedeemer [('Accept, 0), ('Collect, 1), ('Withdraw, 2), ('Dispute, 3), ('Close, 4)]
 
 data EscrowDatum = Published | Active | Withdrawn | Disputed | Closed
     deriving Show
@@ -89,13 +90,13 @@ transition escrow s r = case (escrow, stateData s,stateValue s, r) of
                                                 v <>
                                                 contractValue e
                                               )
-    (e, Active, v, Pay)               -> Just ( Constraints.mustBeSignedBy (provider e) <>
+    (e, Active, v, Collect)               -> Just ( Constraints.mustBeSignedBy (provider e) <>
                                                 Constraints.mustValidateIn (from $ payableTime e v) <>
-                                                Constraints.mustValidateIn (to $ endTime e) <>
-                                                Constraints.mustPayToPubKey (provider e) (trancheValue e v)
+                                                {-Constraints.mustValidateIn (to $ endTime e) <>-}
+                                                Constraints.mustPayToPubKey (provider e) (trancheValue e)
                                               , State Active $
                                                 v <>
-                                                negate (contractValue e)
+                                                negate (trancheValue e)
                                               )
     otherwise                         -> Nothing
 
@@ -104,13 +105,13 @@ transition escrow s r = case (escrow, stateData s,stateValue s, r) of
 {-# INLINABLE payableTime #-}
 payableTime :: AppliedEscrow -> Value -> POSIXTime
 payableTime e v =
-  let start = getPOSIXTime $ startTime e; end = getPOSIXTime $ endTime e; totalTime = start - end; totalAmount = lovelaces $ contractValue e; currentAmount = lovelaces v
+  let start = getPOSIXTime $ startTime e; end = getPOSIXTime $ endTime e; totalTime = end - start; totalAmount = lovelaces $ contractValue e; currentAmount = lovelaces v
     in POSIXTime $ end - Builtins.multiplyInteger (PP.divide currentAmount totalAmount)  totalTime
 
 {-# INLINABLE trancheValue #-}
-trancheValue :: AppliedEscrow -> Value -> Value
-trancheValue e v =
-  lovelaceValueOf $ PP.divide (lovelaces v) (tranches e)
+trancheValue :: AppliedEscrow -> Value
+trancheValue e =
+  lovelaceValueOf $ PP.divide (lovelaces $ contractValue e) (tranches e)
 
 {-# INLINABLE isClosed #-}
 isClosed :: EscrowDatum -> Bool
@@ -220,8 +221,8 @@ accept param = do
         void $ mapError' $ runStep client $ Accept
         logInfo @String $ "Contract accepted: " ++ show escrow
 
-pay :: UseParam -> Contract w s Text ()
-pay param = do
+collect :: UseParam -> Contract w s Text ()
+collect param = do
   pkh <- pubKeyHash <$> Contract.ownPubKey
   let escrow   = AppliedEscrow
               { provider        = pkh
@@ -244,8 +245,8 @@ pay param = do
         logInfo @String $ "Escrow contract found in state: " ++ show currentState
         case currentState of
           Active -> do
-            void $ mapError' $ runStep client $ Pay
-            logInfo @String $ "Contract accepted: " ++ show escrow
+            void $ mapError' $ runStep client $ Collect
+            logInfo @String $ "Funds collected: " ++ show escrow
           _ -> logInfo @String $ "Contract not in active state"
 
     _  ->
@@ -257,6 +258,7 @@ pay param = do
 type StartAppliedEscrowSchema = Endpoint "publish" (PublishParam, Bool)
 
 type UseAppliedEscrowSchema = Endpoint "accept" UseParam
+                          .\/ Endpoint "collect" UseParam
 
 startEscrowEndpoint :: Contract (Last ThreadToken) StartAppliedEscrowSchema Text ()
 startEscrowEndpoint = forever
@@ -264,9 +266,15 @@ startEscrowEndpoint = forever
                         $ awaitPromise
                         $ endpoint @"publish" (\(x,y) -> publish x y)
 
-acceptEscrowEndpoint :: Contract (Last ThreadToken) UseAppliedEscrowSchema Text ()
-acceptEscrowEndpoint = forever
+useEscrowEndpoint :: Contract (Last ThreadToken) UseAppliedEscrowSchema Text ()
+useEscrowEndpoint = forever
                         $ handleError logError
                         $ awaitPromise
                         $ endpoint @"accept" (\x -> accept x)
+
+collectEscrowEndpoint :: Contract (Last ThreadToken) UseAppliedEscrowSchema Text ()
+collectEscrowEndpoint = forever
+                        $ handleError logError
+                        $ awaitPromise
+                        $ endpoint @"collect" (\x -> collect x)
 
