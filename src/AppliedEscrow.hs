@@ -37,7 +37,6 @@ import           Ledger.Constraints           as Constraints
 import           Ledger.Constraints.TxConstraints as TxConstraints
 import           Ledger.Typed.Tx
 import qualified Ledger.Typed.Scripts         as Scripts
-import qualified Ledger.Tx                    as Tx
 import qualified PlutusTx.Builtins            as Builtins
 import           Plutus.Contract              as Contract
 import           Plutus.Contract.StateMachine
@@ -45,7 +44,7 @@ import qualified PlutusTx
 import           PlutusTx.Prelude             hiding (Semigroup(..), check, unless)
 import qualified PlutusTx.Prelude             as PP
 import           Playground.Contract          (ToSchema)
-import           Prelude                      (Semigroup (..), Show (..), String, Integer)
+import           Prelude                      (Semigroup (..), Show (..), String)
 import qualified Prelude
 
 data AppliedEscrow = AppliedEscrow
@@ -85,7 +84,7 @@ lovelaces = Ada.getLovelace . Ada.fromValue
 {-# INLINABLE transition #-}
 transition :: AppliedEscrow -> State EscrowDatum -> EscrowRedeemer -> Maybe (TxConstraints Void Void, State EscrowDatum)
 transition escrow s r = case (escrow, stateData s,stateValue s, r) of
-    (e, d, v, Accept)                 -> Just ( Constraints.mustBeSignedBy (consumer escrow) <>
+    (e, _, v, Accept)                 -> Just ( Constraints.mustBeSignedBy (consumer escrow) <>
                                                 Constraints.mustValidateIn (to $ startTime escrow)
                                               , State Active $
                                                 v <>
@@ -111,7 +110,7 @@ transition escrow s r = case (escrow, stateData s,stateValue s, r) of
                                               , State Closed $
                                                 mempty
                                               )
-    otherwise                         -> Nothing
+    _                                 -> Nothing
 
     where
 
@@ -218,10 +217,10 @@ accept param = do
   let escrow' = useParamToAppliedEscrow param
       escrow  = escrow' {consumer = pkh}
       client  = escrowClient escrow
-  st <- mapError' $ getOnChainState client
-  case st of
+  state <- mapError' $ getOnChainState client
+  case state of
     Nothing   ->  throwError "Nothing found for on chain state"
-    Just (onChainState, utxos)  ->
+    Just (onChainState, _)  ->
       do
         let OnChainState{ocsTxOut=TypedScriptTxOut{tyTxOutData=currentState}} = onChainState
         logInfo @String $ "Escrow contract found in state: " ++ show currentState
@@ -230,7 +229,7 @@ accept param = do
             void $ mapError' $ runStep client $ Accept
             logInfo @String $ "Contract accepted: " ++ show escrow
           _ -> logInfo @String $ "Contract not in published state"
-    _  -> throwError "Something else found for state"
+
 
 collect :: UseParam -> Contract w s Text ()
 collect param = do
@@ -238,10 +237,10 @@ collect param = do
   let escrow' = useParamToAppliedEscrow param
       escrow  = escrow' {provider = pkh}
       client = escrowClient escrow
-  st <- mapError' $ getOnChainState client
-  case st of
+  state <- mapError' $ getOnChainState client
+  case state of
     Nothing   ->  throwError "Nothing found for on chain state"
-    Just (onChainState, utxos)  ->
+    Just (onChainState, _)  ->
       do
         let OnChainState{ocsTxOut=TypedScriptTxOut{tyTxOutData=currentState}} = onChainState
         logInfo @String $ "Escrow contract found in state: " ++ show currentState
@@ -250,7 +249,7 @@ collect param = do
             void $ mapError' $ runStep client $ Collect
             logInfo @String $ "Funds collected: " ++ show escrow
           _ -> logInfo @String $ "Contract not in active state"
-    _  -> throwError "Something else found for state"
+
 
 
 dispute :: UseParam -> Contract w s Text ()
@@ -259,10 +258,10 @@ dispute param = do
   let escrow' = useParamToAppliedEscrow param
       escrow  = escrow' {consumer = pkh}
       client = escrowClient escrow
-  st <- mapError' $ getOnChainState client
-  case st of
+  state <- mapError' $ getOnChainState client
+  case state of
     Nothing   ->  throwError "Nothing found for on chain state"
-    Just (onChainState, utxos)  ->
+    Just (onChainState, _)  ->
       do
         let OnChainState{ocsTxOut=TypedScriptTxOut{tyTxOutData=currentState}} = onChainState
         logInfo @String $ "Escrow contract found in state: " ++ show currentState
@@ -271,7 +270,7 @@ dispute param = do
             void $ mapError' $ runStep client $ Dispute
             logInfo @String $ "Dispute registered: " ++ show escrow
           _ -> logInfo @String $ "Contract not in active state"
-    _  -> throwError "Something else found for state"
+
 
 type StartAppliedEscrowSchema = Endpoint "publish" PublishParam
 
