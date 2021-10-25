@@ -1,6 +1,17 @@
 # Applied escrow
 
-An applied escrow use case.
+This repo showcases a use case for escrow between a provider and consumer of a service, using Plutus.
+
+Scenario:
+- Alice is (for example) a Plutus expert . Bob needs help with Plutus. Alice is offering 60 minute blocks of time, where she offers 1:1 support on Plutus, at a rate of xx Ada/hour. Bob books an hour with Alice. When booking time, he places xx Ada in this escrow contract.
+
+- From the start time on the contract, Alice can collect payments in tranches. This reduces counterparty risk for Alice.
+
+- On the other hand, Bob can raise dispute at any time after the start time. If disputed, Alice cannot collect funds further. Naturally, Alice would halt the service she is providing as well.
+
+- If disputed Bob can collect back his remaining funds only after yy days.
+
+- _TODO_ : A mechanism to allow Alice to collect funds if both parties agree after dispute.
 
 
 This project gives uses the [Plutus Platform starter project](https://github.com/input-output-hk/plutus-starter) as the template.

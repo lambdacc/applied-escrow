@@ -51,10 +51,9 @@ test5 = runEmulatorTraceIO $ runTrace5
 test6 :: IO ()
 test6 = runEmulatorTraceIO $ runTrace6
 
-w1, w2, w3 :: Wallet
-w1 = X.knownWallet 1
-w2 = X.knownWallet 2
-w3 = X.knownWallet 3
+alice, bob :: Wallet
+alice = X.knownWallet 1
+bob = X.knownWallet 2
 
 
 getTT :: ContractHandle (Last ThreadToken) StartAppliedEscrowSchema Text -> EmulatorTrace ThreadToken
@@ -88,8 +87,8 @@ buildPublishParam =
     , ll     = amount
     }
     where
-      pkh1      = (pubKeyHash . walletPubKey) $ w1
-      pkh2      = (pubKeyHash . walletPubKey) $ w2
+      pkh1      = (pubKeyHash . walletPubKey) $ alice
+      pkh2      = (pubKeyHash . walletPubKey) $ bob
       amount    = testContractAmount
       startTime = testContractStartTime
       endTime   = testContractEndTime
@@ -106,144 +105,144 @@ buildUseParam tt =
     , uttn    = tt
     }
     where
-      pkh1      = (pubKeyHash . walletPubKey) $ w1
-      pkh2      = (pubKeyHash . walletPubKey) $ w2
+      pkh1      = (pubKeyHash . walletPubKey) $ alice
+      pkh2      = (pubKeyHash . walletPubKey) $ bob
       amount    = testContractAmount
       startTime = testContractStartTime
       endTime   = testContractEndTime
 
 runTrace1 ::EmulatorTrace ()
 runTrace1 = do
-    h1 <- activateContractWallet w1 startEscrowEndpoint
-    h2 <- activateContractWallet w2 useEscrowEndpoints
+    aliceStartHdl <- activateContractWallet alice startEscrowEndpoint
+    bobHdl <- activateContractWallet bob useEscrowEndpoints
 
     let param = buildPublishParam
     void $ Emulator.waitNSlots 1
-    callEndpoint @"publish" h1 param
-    tt <- getTT h1
+    callEndpoint @"publish" aliceStartHdl param
+    tt <- getTT aliceStartHdl
 
     void $ Emulator.waitNSlots 1
     let useParam = buildUseParam tt
-    callEndpoint @"accept" h2 useParam
+    callEndpoint @"accept" bobHdl useParam
 
     void $ Emulator.waitNSlots 1
 
 -- Provider shouldn't be able to collect funds before  start time
 runTrace2 ::EmulatorTrace ()
 runTrace2 = do
-    h1 <- activateContractWallet w1 startEscrowEndpoint
-    h2 <- activateContractWallet w2 useEscrowEndpoints
-    h3 <- activateContractWallet w1 collectEscrowEndpoint
+    aliceStartHdl <- activateContractWallet alice startEscrowEndpoint
+    bobHdl <- activateContractWallet bob useEscrowEndpoints
+    aliceHdl <- activateContractWallet alice collectEscrowEndpoint
 
     let param = buildPublishParam
     void $ Emulator.waitNSlots 1
-    callEndpoint @"publish" h1 param
-    tt <- getTT h1
+    callEndpoint @"publish" aliceStartHdl param
+    tt <- getTT aliceStartHdl
 
     void $ Emulator.waitNSlots 1
     let useParam = buildUseParam tt
-    callEndpoint @"accept" h2 useParam
+    callEndpoint @"accept" bobHdl useParam
 
     void $ Emulator.waitNSlots 2
-    callEndpoint @"collect" h3 useParam
+    callEndpoint @"collect" aliceHdl useParam
     void $ Emulator.waitNSlots 1
 
 -- Provider collects first tranche but cannot collect second tranche right away
 runTrace3 ::EmulatorTrace ()
 runTrace3 = do
-    h1 <- activateContractWallet w1 startEscrowEndpoint
-    h2 <- activateContractWallet w2 useEscrowEndpoints
-    h3 <- activateContractWallet w1 collectEscrowEndpoint
+    aliceStartHdl <- activateContractWallet alice startEscrowEndpoint
+    bobHdl <- activateContractWallet bob useEscrowEndpoints
+    aliceHdl <- activateContractWallet alice collectEscrowEndpoint
 
     let param = buildPublishParam
     void $ Emulator.waitNSlots 1
-    callEndpoint @"publish" h1 param
-    tt <- getTT h1
+    callEndpoint @"publish" aliceStartHdl param
+    tt <- getTT aliceStartHdl
 
     void $ Emulator.waitNSlots 1
     let useParam = buildUseParam tt
-    callEndpoint @"accept" h2 useParam
+    callEndpoint @"accept" bobHdl useParam
 
     void $ Emulator.waitUntilSlot 10
-    callEndpoint @"collect" h3 useParam
+    callEndpoint @"collect" aliceHdl useParam
     void $ Emulator.waitNSlots 1
-    callEndpoint @"collect" h3 useParam
+    callEndpoint @"collect" aliceHdl useParam
     void $ Emulator.waitNSlots 1
 
 -- Provider collects all tranches at the eligible intervals
 runTrace4 ::EmulatorTrace ()
 runTrace4 = do
-    h1 <- activateContractWallet w1 startEscrowEndpoint
-    h2 <- activateContractWallet w2 useEscrowEndpoints
-    h3 <- activateContractWallet w1 collectEscrowEndpoint
+    aliceStartHdl <- activateContractWallet alice startEscrowEndpoint
+    bobHdl <- activateContractWallet bob useEscrowEndpoints
+    aliceHdl <- activateContractWallet alice collectEscrowEndpoint
 
     let param = buildPublishParam
     void $ Emulator.waitNSlots 1
-    callEndpoint @"publish" h1 param
-    tt <- getTT h1
+    callEndpoint @"publish" aliceStartHdl param
+    tt <- getTT aliceStartHdl
 
     void $ Emulator.waitNSlots 1
     let useParam = buildUseParam tt
-    callEndpoint @"accept" h2 useParam
+    callEndpoint @"accept" bobHdl useParam
 
     void $ Emulator.waitUntilSlot 10
-    callEndpoint @"collect" h3 useParam
+    callEndpoint @"collect" aliceHdl useParam
     void $ Emulator.waitNSlots 2
-    callEndpoint @"collect" h3 useParam
+    callEndpoint @"collect" aliceHdl useParam
     void $ Emulator.waitNSlots 2
-    callEndpoint @"collect" h3 useParam
+    callEndpoint @"collect" aliceHdl useParam
     void $ Emulator.waitNSlots 2
-    callEndpoint @"collect" h3 useParam
+    callEndpoint @"collect" aliceHdl useParam
     void $ Emulator.waitNSlots 2
 
 -- Once consumer raises dispute (after tranche2) the provider cannot collect funds, consumer cannot close within three days
 runTrace5 ::EmulatorTrace ()
 runTrace5 = do
-    h1 <- activateContractWallet w1 startEscrowEndpoint
-    h2 <- activateContractWallet w2 useEscrowEndpoints
-    h3 <- activateContractWallet w1 collectEscrowEndpoint
+    aliceStartHdl <- activateContractWallet alice startEscrowEndpoint
+    bobHdl <- activateContractWallet bob useEscrowEndpoints
+    aliceHdl <- activateContractWallet alice collectEscrowEndpoint
 
     let param = buildPublishParam
     void $ Emulator.waitNSlots 1
-    callEndpoint @"publish" h1 param
-    tt <- getTT h1
+    callEndpoint @"publish" aliceStartHdl param
+    tt <- getTT aliceStartHdl
 
     void $ Emulator.waitNSlots 1
     let useParam = buildUseParam tt
-    callEndpoint @"accept" h2 useParam
+    callEndpoint @"accept" bobHdl useParam
 
     void $ Emulator.waitUntilSlot 10
-    callEndpoint @"collect" h3 useParam
+    callEndpoint @"collect" aliceHdl useParam
     void $ Emulator.waitNSlots 2
-    callEndpoint @"collect" h3 useParam
+    callEndpoint @"collect" aliceHdl useParam
     void $ Emulator.waitNSlots 2
-    callEndpoint @"dispute" h2 useParam
+    callEndpoint @"dispute" bobHdl useParam
     void $ Emulator.waitNSlots 1
-    callEndpoint @"collect" h3 useParam
+    callEndpoint @"collect" aliceHdl useParam
     void $ Emulator.waitUntilSlot 117
-    callEndpoint @"close" h2 useParam
+    callEndpoint @"close" bobHdl useParam
 
 -- Disputed after first tranche, consumer can claim back funds after max settlement time - 3 days after end time, has elapsed
 runTrace6 ::EmulatorTrace ()
 runTrace6 = do
-    h1 <- activateContractWallet w1 startEscrowEndpoint
-    h2 <- activateContractWallet w2 useEscrowEndpoints
-    h3 <- activateContractWallet w1 collectEscrowEndpoint
+    aliceStartHdl <- activateContractWallet alice startEscrowEndpoint
+    bobHdl <- activateContractWallet bob useEscrowEndpoints
+    aliceHdl <- activateContractWallet alice collectEscrowEndpoint
 
     let param = buildPublishParam
     void $ Emulator.waitNSlots 1
-    callEndpoint @"publish" h1 param
-    tt <- getTT h1
+    callEndpoint @"publish" aliceStartHdl param
+    tt <- getTT aliceStartHdl
 
     void $ Emulator.waitNSlots 1
     let useParam = buildUseParam tt
-    callEndpoint @"accept" h2 useParam
+    callEndpoint @"accept" bobHdl useParam
 
     void $ Emulator.waitUntilSlot 10
-    callEndpoint @"collect" h3 useParam
+    callEndpoint @"collect" aliceHdl useParam
     void $ Emulator.waitNSlots 2
-    callEndpoint @"dispute" h2 useParam
+    callEndpoint @"dispute" bobHdl useParam
     void $ Emulator.waitNSlots 1
-    callEndpoint @"collect" h3 useParam
+    callEndpoint @"collect" aliceHdl useParam
     void $ Emulator.waitUntilSlot 118
-    callEndpoint @"close" h2 useParam
+    callEndpoint @"close" bobHdl useParam
