@@ -66,12 +66,13 @@ data EscrowRedeemer =
         | Withdraw
         | Collect
         | Dispute
+        | Unblock
         | Close
         deriving (Show, Generic, FromJSON, ToJSON, Prelude.Eq)
 
 {-Is there a better way to do makeIsDataIndexed ?-}
 PlutusTx.makeLift ''EscrowRedeemer
-PlutusTx.makeIsDataIndexed ''EscrowRedeemer [('Accept, 0), ('Collect, 1), ('Withdraw, 2), ('Dispute, 3), ('Close, 4)]
+PlutusTx.makeIsDataIndexed ''EscrowRedeemer [('Accept, 0), ('Collect, 1), ('Withdraw, 2), ('Dispute, 3), ('Unblock, 4), ('Close, 5)]
 
 data EscrowDatum = Published | Active | Withdrawn | Disputed | Closed
     deriving (Show)
@@ -83,7 +84,6 @@ instance Eq EscrowDatum where
   (==) _ _ = False
 
 PlutusTx.makeIsDataIndexed ''EscrowDatum [('Published, 0), ('Active, 1), ('Withdrawn, 2), ('Disputed, 3), ('Closed, 4)]
-
 
 {-# INLINABLE lovelaces #-}
 lovelaces :: Value -> Integer
@@ -109,6 +109,11 @@ transition escrow s r = case (escrow, stateData s,stateValue s, r) of
                                                 Constraints.mustValidateIn (from $ startTime escrow) <>
                                                 Constraints.mustValidateIn (to $ endTime escrow)
                                               , State Disputed $
+                                                v
+                                              )
+    (e, Disputed, v, Unblock)         -> Just ( Constraints.mustBeSignedBy (consumer e) <>
+                                                Constraints.mustValidateIn (to $ maxSettlementTime e)
+                                              , State Active $
                                                 v
                                               )
     (e, Active, v, Close)             -> Just ( TxConstraints.mustSatisfyAnyOf
@@ -275,7 +280,6 @@ collect param = do
           _ -> logInfo @String $ "Contract has to be in active state for 'Collect' action"
 
 
-
 dispute :: UseParam -> Contract w s Text ()
 dispute param = do
   pkh <- pubKeyHash <$> Contract.ownPubKey
@@ -294,6 +298,26 @@ dispute param = do
             void $ mapError' $ runStep client $ Dispute
             logInfo @String $ "Dispute registered: " ++ show escrow
           _ -> logInfo @String $ "Contract has to be in active state for 'Dispute' action"
+
+
+unblock :: UseParam -> Contract w s Text ()
+unblock param = do
+  pkh <- pubKeyHash <$> Contract.ownPubKey
+  let escrow' = useParamToAppliedEscrow param
+      escrow  = escrow' {consumer = pkh}
+      client = escrowClient escrow
+  state <- mapError' $ getOnChainState client
+  case state of
+    Nothing   ->  throwError "Nothing found for on chain state"
+    Just (onChainState, _)  ->
+      do
+        let OnChainState{ocsTxOut=TypedScriptTxOut{tyTxOutData=valueInState}} = onChainState
+        logInfo @String $ "Escrow contract found in state: " ++ show valueInState
+        case valueInState of
+          Disputed -> do
+            void $ mapError' $ runStep client $ Unblock
+            logInfo @String $ "Status restored to Active: " ++ show escrow
+          _ -> logInfo @String $ "Contract has to be in dispute state for 'Unblock' action"
 
 
 close :: UseParam -> Contract w s Text ()
@@ -321,6 +345,7 @@ type StartAppliedEscrowSchema = Endpoint "publish" PublishParam
 type UseAppliedEscrowSchema = Endpoint "accept" UseParam
                           .\/ Endpoint "collect" UseParam
                           .\/ Endpoint "dispute" UseParam
+                          .\/ Endpoint "unblock" UseParam
                           .\/ Endpoint "close" UseParam
 
 type CollectPaymentSchema = Endpoint "collect" UseParam
@@ -335,11 +360,12 @@ useEscrowEndpoints :: Contract (Last ThreadToken) UseAppliedEscrowSchema Text ()
 useEscrowEndpoints = forever
                         $ handleError logError
                         $ awaitPromise
-                        $ accept' `select` dispute' `select` close'
+                        $ accept' `select` dispute' `select` unblock' `select` close'
                         where
-                          accept'  = endpoint @"accept" (\x -> accept x)
+                          accept'   = endpoint @"accept" (\x -> accept x)
                           dispute'  = endpoint @"dispute" (\x -> dispute x)
-                          close'  = endpoint @"close" (\x -> close x)
+                          unblock'  = endpoint @"unblock" (\x -> unblock x)
+                          close'    = endpoint @"close" (\x -> close x)
 
 collectEscrowEndpoint :: Contract (Last ThreadToken) CollectPaymentSchema Text ()
 collectEscrowEndpoint = forever

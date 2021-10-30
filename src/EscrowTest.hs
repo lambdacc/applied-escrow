@@ -18,19 +18,14 @@ import           AppliedEscrow
 import           Control.Monad              hiding (fmap)
 import           Control.Monad.Freer.Extras as Extras
 import           Data.Default               (Default (..))
-import qualified Data.Map                   as Map
 import           Ledger
 import           Ledger.TimeSlot
-import           Ledger.Value
-import           Ledger.Ada                 as Ada
-import           Numeric.Natural
 import           Plutus.Contract.Test       ((.&&.), walletFundsChange, checkPredicate)
 import           Plutus.Contract.Trace      as X
 import           Plutus.Trace.Emulator      as Emulator
 import           PlutusTx.Prelude
-import           Prelude                    (IO, Show (..), String)
+import           Prelude                    (IO, Show (..))
 import           Test.Tasty
-import           Wallet.Emulator.Wallet
 
 
 test1 :: IO ()
@@ -50,6 +45,9 @@ test5 = runEmulatorTraceIO $ runTrace5
 
 test6 :: IO ()
 test6 = runEmulatorTraceIO $ runTrace6
+
+test7 :: IO ()
+test7 = runEmulatorTraceIO $ runTrace7
 
 alice, bob :: Wallet
 alice = X.knownWallet 1
@@ -81,8 +79,8 @@ buildPublishParam =
   PublishParam
     { p      = pkh1
     , c      = pkh2
-    , st     = startTime
-    , et     = endTime
+    , st     = startT
+    , et     = endT
     , tc     = testTrancheCount
     , ll     = amount
     }
@@ -90,16 +88,16 @@ buildPublishParam =
       pkh1      = (pubKeyHash . walletPubKey) $ alice
       pkh2      = (pubKeyHash . walletPubKey) $ bob
       amount    = testContractAmount
-      startTime = testContractStartTime
-      endTime   = testContractEndTime
+      startT    = testContractStartTime
+      endT      = testContractEndTime
 
 buildUseParam :: ThreadToken -> UseParam
 buildUseParam tt =
   UseParam
     { up      = pkh1
     , uc      = pkh2
-    , ust     = startTime
-    , uet     = endTime
+    , ust     = startT
+    , uet     = endT
     , ull     = amount
     , utc     = testTrancheCount
     , uttn    = tt
@@ -108,8 +106,8 @@ buildUseParam tt =
       pkh1      = (pubKeyHash . walletPubKey) $ alice
       pkh2      = (pubKeyHash . walletPubKey) $ bob
       amount    = testContractAmount
-      startTime = testContractStartTime
-      endTime   = testContractEndTime
+      startT    = testContractStartTime
+      endT      = testContractEndTime
 
 runTrace1 ::EmulatorTrace ()
 runTrace1 = do
@@ -168,6 +166,7 @@ runTrace3 = do
     void $ Emulator.waitNSlots 1
     callEndpoint @"collect" aliceHdl useParam
     void $ Emulator.waitNSlots 1
+    callEndpoint @"collect" aliceHdl useParam	
 
 -- Provider collects all tranches at the eligible intervals
 runTrace4 ::EmulatorTrace ()
@@ -246,3 +245,32 @@ runTrace6 = do
     callEndpoint @"collect" aliceHdl useParam
     void $ Emulator.waitUntilSlot 118
     callEndpoint @"close" bobHdl useParam
+
+-- Disputed after first tranche, but consumer unblocks after second tranche. Alice can collect all tranches then.
+runTrace7 ::EmulatorTrace ()
+runTrace7 = do
+    aliceStartHdl <- activateContractWallet alice startEscrowEndpoint
+    bobHdl <- activateContractWallet bob useEscrowEndpoints
+    aliceHdl <- activateContractWallet alice collectEscrowEndpoint
+
+    let param = buildPublishParam
+    void $ Emulator.waitNSlots 1
+    callEndpoint @"publish" aliceStartHdl param
+    tt <- getTT aliceStartHdl
+
+    void $ Emulator.waitNSlots 1
+    let useParam = buildUseParam tt
+    callEndpoint @"accept" bobHdl useParam
+
+    void $ Emulator.waitUntilSlot 10
+    callEndpoint @"collect" aliceHdl useParam
+    void $ Emulator.waitNSlots 1
+    callEndpoint @"dispute" bobHdl useParam
+    void $ Emulator.waitNSlots 60
+    callEndpoint @"unblock" bobHdl useParam
+    void $ Emulator.waitNSlots 1
+    callEndpoint @"collect" aliceHdl useParam
+    void $ Emulator.waitNSlots 1
+    callEndpoint @"collect" aliceHdl useParam
+    void $ Emulator.waitNSlots 1
+    callEndpoint @"collect" aliceHdl useParam
