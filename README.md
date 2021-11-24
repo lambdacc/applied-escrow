@@ -11,7 +11,8 @@ Scenario:
 
 - If disputed Bob can collect back his remaining funds only after yy days.
 
-- _TODO_ : A mechanism to allow Alice to collect funds if both parties agree after dispute.
+- If both parties reconcile after a dispute within yy days and Bob unblocks collect, Alice can collect.
+
 - _TODO_ (if useful): Endpoints to withdraw from the contract.
 
 

@@ -72,7 +72,7 @@ testContractStartTime :: POSIXTime
 testContractStartTime = slotToBeginPOSIXTime def 10
 
 testContractEndTime :: POSIXTime
-testContractEndTime = slotToBeginPOSIXTime def 18
+testContractEndTime = slotToBeginPOSIXTime def 26
 
 buildPublishParam :: PublishParam
 buildPublishParam =
@@ -186,13 +186,13 @@ runTrace4 = do
 
     void $ Emulator.waitUntilSlot 10
     callEndpoint @"collect" aliceHdl useParam
-    void $ Emulator.waitNSlots 2
+    void $ Emulator.waitNSlots 4
     callEndpoint @"collect" aliceHdl useParam
-    void $ Emulator.waitNSlots 2
+    void $ Emulator.waitNSlots 4
     callEndpoint @"collect" aliceHdl useParam
-    void $ Emulator.waitNSlots 2
+    void $ Emulator.waitNSlots 4
     callEndpoint @"collect" aliceHdl useParam
-    void $ Emulator.waitNSlots 2
+    void $ Emulator.waitNSlots 4
 
 -- Once consumer raises dispute (after tranche2) the provider cannot collect funds, consumer cannot close within three days
 runTrace5 ::EmulatorTrace ()
@@ -212,13 +212,13 @@ runTrace5 = do
 
     void $ Emulator.waitUntilSlot 10
     callEndpoint @"collect" aliceHdl useParam
-    void $ Emulator.waitNSlots 2
+    void $ Emulator.waitNSlots 4
     callEndpoint @"collect" aliceHdl useParam
-    void $ Emulator.waitNSlots 2
+    void $ Emulator.waitNSlots 4
     callEndpoint @"dispute" bobHdl useParam
     void $ Emulator.waitNSlots 1
     callEndpoint @"collect" aliceHdl useParam
-    void $ Emulator.waitUntilSlot 117
+    void $ Emulator.waitUntilSlot 125
     callEndpoint @"close" bobHdl useParam
 
 -- Disputed after first tranche, consumer can claim back funds after max settlement time - 3 days after end time, has elapsed
@@ -239,11 +239,11 @@ runTrace6 = do
 
     void $ Emulator.waitUntilSlot 10
     callEndpoint @"collect" aliceHdl useParam
-    void $ Emulator.waitNSlots 2
+    void $ Emulator.waitNSlots 4
     callEndpoint @"dispute" bobHdl useParam
-    void $ Emulator.waitNSlots 1
+    void $ Emulator.waitNSlots 4
     callEndpoint @"collect" aliceHdl useParam
-    void $ Emulator.waitUntilSlot 118
+    void $ Emulator.waitUntilSlot 126
     callEndpoint @"close" bobHdl useParam
 
 -- Disputed after first tranche, but consumer unblocks after second tranche. Alice can collect all tranches then.
